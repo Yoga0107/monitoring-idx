@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { usePolledJson } from "@/hooks/use-polled-json";
+import { useSource } from "@/hooks/use-source";
 import type { IndexHistory, MarketSnapshot, TimeRange } from "@/types/market";
 import { DataBanner } from "./data-banner";
 import { Footer } from "./footer";
@@ -16,8 +17,10 @@ const HISTORY_POLL_MS = 60_000;
 
 export function Dashboard() {
   const [range, setRange] = useState<TimeRange>("1D");
-  const snap = usePolledJson<MarketSnapshot>("/api/market/indices", SNAPSHOT_POLL_MS);
-  const hist = usePolledJson<IndexHistory>(`/api/market/history?code=IHSG&range=${range}`, range === "1D" ? HISTORY_POLL_MS : 0);
+  const { source, setSource } = useSource();
+  const sourceParam = source ? `&source=${source}` : "";
+  const snap = usePolledJson<MarketSnapshot>(`/api/market/indices${source ? `?source=${source}` : ""}`, SNAPSHOT_POLL_MS);
+  const hist = usePolledJson<IndexHistory>(`/api/market/history?code=IHSG&range=${range}${sourceParam}`, range === "1D" ? HISTORY_POLL_MS : 0);
 
   const ihsg = snap.data?.quotes.find((q) => q.code === "IHSG") ?? null;
   const refreshAll = () => {
@@ -30,7 +33,7 @@ export function Dashboard() {
       <Sidebar online={!snap.error || !!snap.data} />
       <div className="pl-16 flex-1 flex flex-col min-w-0">
         <TopBar snapshot={snap.data} error={snap.error} loading={snap.loading} refreshing={snap.refreshing || hist.refreshing} onRefresh={refreshAll} />
-        <DataBanner snapshot={snap.data} error={snap.error} />
+        <DataBanner snapshot={snap.data} error={snap.error} source={source} onSourceChange={setSource} />
         {snap.error && snap.data && (
           <div role="status" className="px-6 py-1.5 bg-error-container/20 border-b border-outline-variant text-error font-body-sm text-body-sm">
             Refresh failed — showing the last successful data. {snap.error}

@@ -1,9 +1,14 @@
 /** Server-side environment access. Never import this file from a client component. */
-export type ProviderId = "mock" | "yahoo";
+import { SOURCE_CHOICES, type SourceChoice } from "@/types/market";
 
-export function getProviderId(): ProviderId {
-  const raw = (process.env.MARKET_DATA_PROVIDER ?? "mock").trim().toLowerCase();
-  return raw === "yahoo" ? "yahoo" : "mock";
+export function parseSource(raw: string | null | undefined): SourceChoice | null {
+  const v = raw?.trim().toLowerCase();
+  return SOURCE_CHOICES.find((s) => s === v) ?? null;
+}
+
+/** Used when a request has no ?source=. Set MARKET_DATA_PROVIDER to auto | yahoo | mock. */
+export function getDefaultSource(): SourceChoice {
+  return parseSource(process.env.MARKET_DATA_PROVIDER) ?? "auto";
 }
 
 /** Optional Yahoo symbol overrides, e.g. YAHOO_SYMBOL_IDX30. Empty = not configured. */

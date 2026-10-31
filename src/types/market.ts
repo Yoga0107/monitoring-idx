@@ -8,6 +8,10 @@ export type TimeRange = (typeof TIME_RANGES)[number];
 /** How fresh the numbers are. Always surfaced in the UI. */
 export type DataMode = "realtime" | "delayed" | "end-of-day" | "mock";
 
+/** Data source the user (or the server default) asks for. "auto" = Yahoo, falling back to mock. */
+export const SOURCE_CHOICES = ["auto", "yahoo", "mock"] as const;
+export type SourceChoice = (typeof SOURCE_CHOICES)[number];
+
 export type MarketState = "OPEN" | "BREAK" | "CLOSED";
 
 export interface MarketStatus {
@@ -58,6 +62,11 @@ export interface DataMeta {
   latencyMs: number;
   /** True when served from the in-memory cache. */
   cached: boolean;
+  /** What was requested; `provider` is what actually answered. */
+  requestedSource: SourceChoice;
+  /** True when "auto" could not reach Yahoo and fell back to mock data. */
+  fallback: boolean;
+  fallbackReason: string | null;
 }
 
 export interface MarketSnapshot {
