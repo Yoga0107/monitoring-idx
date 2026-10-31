@@ -26,9 +26,18 @@ export const toneBar: Record<Tone, string> = {
 
 export const toneHex: Record<Tone, string> = { up: "#4edea3", down: "#ffb4ab", flat: "#87929a" };
 
-const num = new Intl.NumberFormat("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const formatters = new Map<number, Intl.NumberFormat>();
+function numberFormat(decimals: number): Intl.NumberFormat {
+  let f = formatters.get(decimals);
+  if (!f) {
+    f = new Intl.NumberFormat("en-US", { minimumFractionDigits: decimals, maximumFractionDigits: decimals });
+    formatters.set(decimals, f);
+  }
+  return f;
+}
+const num = numberFormat(2);
 
-export const fmtNum = (v: number) => num.format(v);
+export const fmtNum = (v: number, decimals = 2) => numberFormat(decimals).format(v);
 export const fmtSigned = (v: number) => `${v > 0 ? "+" : v < 0 ? "-" : ""}${num.format(Math.abs(v))}`;
 export const fmtPct = (v: number) => `${fmtSigned(v)}%`;
 

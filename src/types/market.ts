@@ -6,11 +6,7 @@ export const TIME_RANGES = ["1D", "1W", "1M", "3M", "6M", "1Y"] as const;
 export type TimeRange = (typeof TIME_RANGES)[number];
 
 /** How fresh the numbers are. Always surfaced in the UI. */
-export type DataMode = "realtime" | "delayed" | "end-of-day" | "mock";
-
-/** Data source the user (or the server default) asks for. "auto" = Yahoo, falling back to mock. */
-export const SOURCE_CHOICES = ["auto", "yahoo", "mock"] as const;
-export type SourceChoice = (typeof SOURCE_CHOICES)[number];
+export type DataMode = "realtime" | "delayed" | "end-of-day";
 
 export type MarketState = "OPEN" | "BREAK" | "CLOSED";
 
@@ -62,11 +58,6 @@ export interface DataMeta {
   latencyMs: number;
   /** True when served from the in-memory cache. */
   cached: boolean;
-  /** What was requested; `provider` is what actually answered. */
-  requestedSource: SourceChoice;
-  /** True when "auto" could not reach Yahoo and fell back to mock data. */
-  fallback: boolean;
-  fallbackReason: string | null;
 }
 
 export interface MarketSnapshot {
@@ -95,4 +86,72 @@ export interface IndexHistory {
 
 export interface ApiErrorBody {
   error: { code: string; message: string };
+}
+
+/* ---------- Health check ---------- */
+
+export type HealthStatus = "ok" | "warn" | "fail";
+
+export interface HealthCheck {
+  name: string;
+  status: HealthStatus;
+  /** Time the check took; null when it was skipped. */
+  latencyMs: number | null;
+  detail: string;
+}
+
+export interface ProviderHealth {
+  id: string;
+  label: string;
+  dataMode: DataMode;
+  status: HealthStatus;
+  checks: HealthCheck[];
+  /** Newest provider-reported data timestamp among successful checks. */
+  latestDataAt: string | null;
+}
+
+export interface HealthReport {
+  checkedAt: string;
+  marketStatus: MarketStatus;
+  overall: { status: HealthStatus; message: string };
+  providers: ProviderHealth[];
+  config: {
+    yahooSymbols: { code: IndexCode; symbol: string | null }[];
+    nodeVersion: string;
+    vercelRegion: string | null;
+  };
+}
+
+/* ---------- Stocks (watchlist) ---------- */
+
+export interface StockQuote {
+  /** IDX ticker without suffix, e.g. "BBCA". */
+  symbol: string;
+  name: string | null;
+  last: number;
+  change: number;
+  changePct: number;
+  open: number | null;
+  high: number;
+  low: number;
+  prevClose: number;
+  volumeLots: number | null;
+  updatedAt: string;
+  sparkline: number[];
+}
+
+export interface StocksSnapshot {
+  quotes: StockQuote[];
+  unavailable: { symbol: string; reason: string }[];
+  marketStatus: MarketStatus;
+  meta: DataMeta;
+}
+
+export interface StockHistory {
+  symbol: string;
+  range: TimeRange;
+  points: HistoryPoint[];
+  prevClose: number | null;
+  marketStatus: MarketStatus;
+  meta: DataMeta;
 }

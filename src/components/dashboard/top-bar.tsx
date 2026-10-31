@@ -1,29 +1,41 @@
 "use client";
 
+import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { Icon } from "@/components/ui/icon";
 import { useClock } from "@/hooks/use-wib-clock";
 import { fmtDateId, fmtTimeWib } from "@/lib/format";
 import { cn } from "@/lib/utils";
-import type { MarketSnapshot } from "@/types/market";
+import type { DataMeta, MarketStatus } from "@/types/market";
 
 interface Props {
-  snapshot: MarketSnapshot | null;
+  status: MarketStatus | null;
+  meta: DataMeta | null;
+  /** Newest trade time reported by the source. */
+  lastUpdate: string | null;
   error: string | null;
   loading: boolean;
   refreshing: boolean;
   onRefresh: () => void;
 }
 
-export function TopBar({ snapshot, error, loading, refreshing, onRefresh }: Props) {
+export function TopBar({ status, meta, lastUpdate, error, loading, refreshing, onRefresh }: Props) {
   const now = useClock();
-  const status = snapshot?.marketStatus;
-  const lastUpdate = snapshot?.quotes.reduce<string | null>((max, q) => (!max || q.updatedAt > max ? q.updatedAt : max), null);
 
   const dot = status?.state === "OPEN" ? "bg-secondary status-pulse" : status?.state === "BREAK" ? "bg-primary-container" : "bg-outline";
   const text = status?.state === "OPEN" ? "text-secondary-fixed" : status?.state === "BREAK" ? "text-primary" : "text-outline";
 
-  const apiLabel = error && !snapshot ? "API: ERROR" : loading ? "API: CONNECTING…" : `API: CONNECTED (${snapshot?.meta.providerLabel ?? "—"})`;
+  const apiLabel =
+    error && !meta
+      ? "API: ERROR"
+      : error
+        ? "API: REFRESH FAILING — STALE DATA"
+        : loading
+          ? "API: CONNECTING…"
+          : meta
+            ? `API: CONNECTED (${meta.providerLabel})`
+            : "API: IDLE";
+  const apiDot = error ? "bg-error" : meta ? "bg-primary-container" : "bg-outline";
 
   return (
     <header className="flex justify-between items-center w-full px-6 py-3 bg-surface border-b border-outline-variant sticky top-0 z-30">
@@ -49,14 +61,21 @@ export function TopBar({ snapshot, error, loading, refreshing, onRefresh }: Prop
 
       <div className="flex items-center space-x-4">
         <div className="hidden lg:flex items-center space-x-2 px-2 py-0.5 rounded border border-outline-variant bg-surface-container-low">
-          <span className={cn("w-1.5 h-1.5 rounded-full", error && !snapshot ? "bg-error" : "bg-primary-container")} />
+          <span className={cn("w-1.5 h-1.5 rounded-full", apiDot)} />
           <span className="font-label-caps text-label-caps text-on-surface-variant">{apiLabel}</span>
         </div>
-        <div className="hidden md:flex items-center space-x-1.5 text-on-surface-variant">
+        <div className="hidden md:flex items-center space-x-1.5 text-on-surface-variant" title="Time of the newest trade reported by the data source. It does not advance while the market is closed or on break.">
           <span className="font-label-caps text-label-caps text-outline">LAST UPDATE:</span>
           <span className="font-data-mono-sm text-data-mono-sm text-on-surface font-medium">{lastUpdate ? fmtTimeWib(lastUpdate) : "—"}</span>
         </div>
+        <div className="hidden xl:flex items-center space-x-1.5 text-on-surface-variant" title="When the server last pulled data from the source (cached for up to 15 s while trading).">
+          <span className="font-label-caps text-label-caps text-outline">FETCHED:</span>
+          <span className="font-data-mono-sm text-data-mono-sm text-on-surface font-medium">{meta ? fmtTimeWib(meta.fetchedAt) : "—"}</span>
+        </div>
         <div className="flex items-center space-x-1">
+          <Link href="/health" title="API health check" aria-label="API health check" className="w-8 h-8 rounded-lg flex items-center justify-center text-outline hover:text-primary hover:bg-surface-variant transition-colors">
+            <Icon name="monitor_heart" size={18} />
+          </Link>
           <Button variant="ghost" size="icon" title="Refresh data" aria-label="Refresh data" onClick={onRefresh} disabled={refreshing}>
             <Icon name="refresh" size={18} className={refreshing ? "animate-spin" : undefined} />
           </Button>

@@ -3,6 +3,7 @@ import type {
   HistoryPoint,
   IndexDefinition,
   IndexQuote,
+  StockQuote,
   TimeRange,
 } from "@/types/market";
 
@@ -31,6 +32,12 @@ export interface MarketDataProvider {
     unavailable: { code: IndexDefinition["code"]; reason: string }[];
   }>;
   getHistory(index: IndexDefinition, range: TimeRange): Promise<HistoryResult>;
+  /** IDX equities by ticker (no suffix). Unknown tickers are reported in `unavailable`, not thrown. */
+  getStockQuotes(symbols: string[]): Promise<{
+    quotes: StockQuote[];
+    unavailable: { symbol: string; reason: string }[];
+  }>;
+  getStockHistory(symbol: string, range: TimeRange): Promise<HistoryResult>;
 }
 
 export class MarketDataError extends Error {
@@ -41,6 +48,7 @@ export class MarketDataError extends Error {
       | "UPSTREAM_TIMEOUT"
       | "NOT_CONFIGURED"
       | "NOT_SUPPORTED"
+      | "NOT_FOUND"
       | "BAD_REQUEST" = "UPSTREAM_ERROR",
     public readonly status = 502,
   ) {

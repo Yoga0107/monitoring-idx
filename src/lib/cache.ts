@@ -26,6 +26,10 @@ export async function cached<T>(
 
   const promise = loader()
     .then((value) => {
+      if (store.size >= 200) {
+        const t = Date.now();
+        for (const [k, e] of store) if (e.expiresAt <= t) store.delete(k);
+      }
       store.set(key, { value, expiresAt: Date.now() + ttlMs });
       return value;
     })

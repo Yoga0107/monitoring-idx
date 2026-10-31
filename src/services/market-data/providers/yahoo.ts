@@ -4,6 +4,7 @@ import { MarketDataError, type HistoryResult, type MarketDataProvider } from "..
 import {
   normalizeYahooHistory,
   normalizeYahooQuote,
+  normalizeYahooStock,
   type YahooChartResponse,
 } from "../normalizers/yahoo";
 
@@ -43,6 +44,9 @@ async function fetchChart(symbol: string, range: TimeRange): Promise<YahooChartR
       504,
     );
   }
+  if (res.status === 404) {
+    throw new MarketDataError("Symbol not found on Yahoo Finance", "NOT_FOUND", 404);
+  }
   if (!res.ok) {
     throw new MarketDataError(`Market data provider responded with HTTP ${res.status}`, "UPSTREAM_ERROR");
   }
@@ -53,8 +57,8 @@ export class YahooProvider implements MarketDataProvider {
   readonly id = "yahoo";
   readonly label = "YAHOO FINANCE (UNOFFICIAL)";
   readonly dataMode = "delayed" as const;
-  /** Nominal delay for IDX on Yahoo; confirm for your use. */
-  readonly delayMinutes = 10;
+  /** Unknown: this unofficial feed gives no delay guarantee, so none is claimed. */
+  readonly delayMinutes = null;
 
   async getQuotes(indices: IndexDefinition[]) {
     const settled = await Promise.allSettled(
@@ -82,5 +86,34 @@ export class YahooProvider implements MarketDataProvider {
     const symbol = getYahooSymbol(def.code);
     if (!symbol) throw new MarketDataError(`No Yahoo symbol configured for ${def.code}`, "NOT_CONFIGURED", 404);
     return normalizeYahooHistory(await fetchChart(symbol, range));
+  }
+
+  /** IDX equities use the ".JK" suffix on Yahoo (BBCA -> BBCA.JK). */
+  async getStockQuotes(symbols: string[]) {
+    const settled = await Promise.allSettled(
+      symbols.map(async (sym) => normalizeYahooStock(await fetchChart(`${sym}.JK`, "1D"), sym)),
+    );
+    const quotes: Awaited<ReturnType<MarketDataProvider["getStockQuotes"]>>["quotes"] = [];
+    const unavailable: Awaited<ReturnType<MarketDataProvider["getStockQuotes"]>>["unavailable"] = [];
+    let hardError: MarketDataError | null = null;
+    settled.forEach((r, i) => {
+      const symbol = symbols[i];
+      if (!symbol) return;
+      if (r.status === "fulfilled") {
+        quotes.push(r.value);
+        return;
+      }
+      const e = r.reason;
+      const err = e instanceof MarketDataError ? e : new MarketDataError(e instanceof Error ? e.message : "Unknown error");
+      unavailable.push({ symbol, reason: err.message });
+      // A wrong ticker is the user's typo, not an outage: only real failures (network, HTTP errors) may fail the whole request.
+      if (err.code !== "NOT_FOUND") hardError ??= err;
+    });
+    if (quotes.length === 0 && hardError) throw hardError;
+    return { quotes, unavailable };
+  }
+
+  async getStockHistory(symbol: string, range: TimeRange): Promise<HistoryResult> {
+    return normalizeYahooHistory(await fetchChart(`${symbol}.JK`, range));
   }
 }

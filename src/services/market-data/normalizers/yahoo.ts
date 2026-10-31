@@ -1,4 +1,4 @@
-import type { HistoryPoint, IndexDefinition, IndexQuote } from "@/types/market";
+import type { HistoryPoint, IndexDefinition, IndexQuote, StockQuote } from "@/types/market";
 import { MarketDataError } from "../provider";
 
 /** Subset of Yahoo's /v8/finance/chart response that we rely on. */
@@ -13,6 +13,8 @@ export interface YahooChartResponse {
         regularMarketTime?: number;
         previousClose?: number;
         chartPreviousClose?: number;
+        shortName?: string;
+        longName?: string;
       };
       timestamp?: number[];
       indicators?: {
@@ -48,8 +50,22 @@ export function normalizeYahooHistory(raw: YahooChartResponse): {
   return { points, prevClose: isNum(prev) ? round2(prev) : null };
 }
 
-/** Normalize a 1-day, intraday chart response into an IndexQuote. */
-export function normalizeYahooQuote(raw: YahooChartResponse, def: IndexDefinition): IndexQuote {
+interface QuoteCore {
+  name: string | null;
+  last: number;
+  change: number;
+  changePct: number;
+  open: number | null;
+  high: number;
+  low: number;
+  prevClose: number;
+  volumeLots: number | null;
+  updatedAt: string;
+  sparkline: number[];
+}
+
+/** Shared by indices and stocks: a 1-day intraday chart response -> quote fields. */
+function normalizeCore(raw: YahooChartResponse, label: string): QuoteCore {
   const result = unwrap(raw);
   const meta = result.meta ?? {};
   const q = result.indicators?.quote?.[0] ?? {};
@@ -61,12 +77,12 @@ export function normalizeYahooQuote(raw: YahooChartResponse, def: IndexDefinitio
   const last = isNum(meta.regularMarketPrice) ? meta.regularMarketPrice : closes[closes.length - 1];
   const prevClose = meta.previousClose ?? meta.chartPreviousClose;
   if (!isNum(last) || !isNum(prevClose) || prevClose === 0) {
-    throw new MarketDataError(`Incomplete quote for ${def.code}`, "UPSTREAM_ERROR");
+    throw new MarketDataError(`Incomplete quote for ${label}`, "UPSTREAM_ERROR");
   }
 
   const high = meta.regularMarketDayHigh ?? (highs.length ? Math.max(...highs) : last);
   const low = meta.regularMarketDayLow ?? (lows.length ? Math.min(...lows) : last);
-  // Yahoo reports IDX volume in shares (lembar); 1 lot = 100 shares.
+  // Yahoo reports IDX volume in shares (lembar); 1 lot = 100 shares. Unverified assumption.
   const rawVolume = meta.regularMarketVolume ?? (q.volume ?? []).filter(isNum).reduce((a, b) => a + b, 0);
   const volumeLots = isNum(rawVolume) && rawVolume > 0 ? Math.round(rawVolume / 100) : null;
 
@@ -74,10 +90,7 @@ export function normalizeYahooQuote(raw: YahooChartResponse, def: IndexDefinitio
   const updatedMs = (meta.regularMarketTime ?? result.timestamp?.[result.timestamp.length - 1] ?? Date.now() / 1000) * 1000;
 
   return {
-    code: def.code,
-    name: def.name,
-    description: def.description,
-    tag: def.tag,
+    name: meta.longName ?? meta.shortName ?? null,
     last: round2(last),
     change: round2(change),
     changePct: round2((change / prevClose) * 100),
@@ -91,9 +104,21 @@ export function normalizeYahooQuote(raw: YahooChartResponse, def: IndexDefinitio
   };
 }
 
+export function normalizeYahooQuote(raw: YahooChartResponse, def: IndexDefinition): IndexQuote {
+  const c = normalizeCore(raw, def.code);
+  return { ...c, code: def.code, name: def.name, description: def.description, tag: def.tag };
+}
+
+export function normalizeYahooStock(raw: YahooChartResponse, symbol: string): StockQuote {
+  return { ...normalizeCore(raw, symbol), symbol };
+}
+
 function unwrap(raw: YahooChartResponse) {
   const err = raw.chart?.error;
-  if (err) throw new MarketDataError(err.description ?? err.code ?? "Yahoo returned an error", "UPSTREAM_ERROR");
+  if (err) {
+    const notFound = err.code === "Not Found";
+    throw new MarketDataError(err.description ?? err.code ?? "Yahoo returned an error", notFound ? "NOT_FOUND" : "UPSTREAM_ERROR", notFound ? 404 : 502);
+  }
   const result = raw.chart?.result?.[0];
   if (!result) throw new MarketDataError("Yahoo returned no data for this symbol", "UPSTREAM_ERROR");
   return result;

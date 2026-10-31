@@ -1,44 +1,37 @@
 import "server-only";
-import type { DataMeta, DataMode, IndexHistory, MarketSnapshot, SourceChoice, TimeRange } from "@/types/market";
+import type {
+  DataMeta,
+  DataMode,
+  IndexHistory,
+  MarketSnapshot,
+  StockHistory,
+  StocksSnapshot,
+  TimeRange,
+} from "@/types/market";
 import { cached } from "@/lib/cache";
-import { getDefaultSource } from "@/lib/env";
 import { INDICES, getIndexDefinition } from "./indices";
 import { getMarketStatus } from "./market-hours";
 import { MarketDataError, type MarketDataProvider } from "./provider";
-import { MockProvider } from "./providers/mock";
 import { YahooProvider } from "./providers/yahoo";
 
-type ProviderId = "mock" | "yahoo";
-const instances: Partial<Record<ProviderId, MarketDataProvider>> = {};
+let provider: MarketDataProvider | null = null;
 
-/** Add new vendors here. */
-export function getProvider(id: ProviderId): MarketDataProvider {
-  return (instances[id] ??= id === "yahoo" ? new YahooProvider() : new MockProvider());
+/** The single active provider. To switch vendors, return a different MarketDataProvider here. */
+export function getProvider(): MarketDataProvider {
+  return (provider ??= new YahooProvider());
 }
 
-interface Resolved<T> {
+interface Fetched<T> {
   value: T;
-  used: ProviderId;
-  fallbackReason: string | null;
   latencyMs: number;
+  /** When the provider was actually called (stays constant on cache hits). */
+  fetchedAt: string;
 }
 
-/** Runs `run` against the requested source. "auto" = Yahoo first, mock if Yahoo fails. */
-async function withSource<T>(source: SourceChoice, run: (p: MarketDataProvider) => Promise<T>): Promise<Resolved<T>> {
+async function fetchTimed<T>(run: (p: MarketDataProvider) => Promise<T>): Promise<Fetched<T>> {
   const t0 = Date.now();
-  if (source !== "auto") {
-    const value = await run(getProvider(source));
-    return { value, used: source, fallbackReason: null, latencyMs: Date.now() - t0 };
-  }
-  try {
-    const value = await run(getProvider("yahoo"));
-    return { value, used: "yahoo", fallbackReason: null, latencyMs: Date.now() - t0 };
-  } catch (e) {
-    const reason = e instanceof Error ? e.message : "Unknown error";
-    console.warn(`[market-data] auto: Yahoo failed (${reason}); using mock data`);
-    const value = await run(getProvider("mock"));
-    return { value, used: "mock", fallbackReason: reason, latencyMs: Date.now() - t0 };
-  }
+  const value = await run(getProvider());
+  return { value, latencyMs: Date.now() - t0, fetchedAt: new Date().toISOString() };
 }
 
 function effectiveMode(p: MarketDataProvider, marketOpen: boolean): DataMode {
@@ -46,62 +39,92 @@ function effectiveMode(p: MarketDataProvider, marketOpen: boolean): DataMode {
   return p.dataMode === "delayed" && !marketOpen ? "end-of-day" : p.dataMode;
 }
 
-function buildMeta(r: Resolved<unknown>, requested: SourceChoice, marketOpen: boolean, hit: boolean, elapsedMs: number): DataMeta {
-  const p = getProvider(r.used);
+function buildMeta(f: Fetched<unknown>, marketOpen: boolean, hit: boolean, elapsedMs: number): DataMeta {
+  const p = getProvider();
   return {
     provider: p.id,
     providerLabel: p.label,
     dataMode: effectiveMode(p, marketOpen),
     delayMinutes: p.delayMinutes,
-    fetchedAt: new Date().toISOString(),
-    latencyMs: hit ? elapsedMs : r.latencyMs,
+    fetchedAt: f.fetchedAt,
+    latencyMs: hit ? elapsedMs : f.latencyMs,
     cached: hit,
-    requestedSource: requested,
-    fallback: r.fallbackReason !== null,
-    fallbackReason: r.fallbackReason,
   };
 }
 
-const SNAPSHOT_TTL_OPEN_MS = 30_000;
-const SNAPSHOT_TTL_CLOSED_MS = 5 * 60_000;
+// Short while trading so numbers stay as fresh as the source allows; long when the market is closed.
+const QUOTE_TTL_OPEN_MS = 15_000;
+const QUOTE_TTL_CLOSED_MS = 5 * 60_000;
 
-export async function getMarketSnapshot(source?: SourceChoice): Promise<MarketSnapshot> {
-  const requested = source ?? getDefaultSource();
+function historyTtl(range: TimeRange, closed: boolean): number {
+  if (range !== "1D") return 15 * 60_000;
+  return closed ? 10 * 60_000 : 30_000;
+}
+
+export async function getMarketSnapshot(): Promise<MarketSnapshot> {
   const status = getMarketStatus();
-  const ttl = status.state === "CLOSED" ? SNAPSHOT_TTL_CLOSED_MS : SNAPSHOT_TTL_OPEN_MS;
-
+  const closed = status.state === "CLOSED";
   const started = Date.now();
-  const { value: r, hit } = await cached(`snapshot:${requested}`, ttl, () =>
-    withSource(requested, (p) => p.getQuotes(INDICES)),
+  const { value: f, hit } = await cached("snapshot", closed ? QUOTE_TTL_CLOSED_MS : QUOTE_TTL_OPEN_MS, () =>
+    fetchTimed((p) => p.getQuotes(INDICES)),
   );
-
   return {
-    quotes: r.value.quotes,
-    unavailable: r.value.unavailable,
+    quotes: f.value.quotes,
+    unavailable: f.value.unavailable,
     marketStatus: status,
-    meta: buildMeta(r, requested, status.state !== "CLOSED", hit, Date.now() - started),
+    meta: buildMeta(f, !closed, hit, Date.now() - started),
   };
 }
 
-export async function getIndexHistory(code: string, range: TimeRange, source?: SourceChoice): Promise<IndexHistory> {
+export async function getIndexHistory(code: string, range: TimeRange): Promise<IndexHistory> {
   const def = getIndexDefinition(code);
   if (!def) throw new MarketDataError(`Unknown index "${code}"`, "BAD_REQUEST", 400);
 
-  const requested = source ?? getDefaultSource();
   const status = getMarketStatus();
-  const ttl = range === "1D" ? (status.state === "CLOSED" ? 10 * 60_000 : 60_000) : 15 * 60_000;
-
+  const closed = status.state === "CLOSED";
   const started = Date.now();
-  const { value: r, hit } = await cached(`history:${requested}:${def.code}:${range}`, ttl, () =>
-    withSource(requested, (p) => p.getHistory(def, range)),
+  const { value: f, hit } = await cached(`history:${def.code}:${range}`, historyTtl(range, closed), () =>
+    fetchTimed((p) => p.getHistory(def, range)),
   );
-
   return {
     code: def.code,
     range,
-    points: r.value.points,
-    prevClose: r.value.prevClose,
+    points: f.value.points,
+    prevClose: f.value.prevClose,
     marketStatus: status,
-    meta: buildMeta(r, requested, status.state !== "CLOSED", hit, Date.now() - started),
+    meta: buildMeta(f, !closed, hit, Date.now() - started),
+  };
+}
+
+export async function getStocksSnapshot(symbols: string[]): Promise<StocksSnapshot> {
+  const status = getMarketStatus();
+  const closed = status.state === "CLOSED";
+  const started = Date.now();
+  const key = `stocks:${[...symbols].sort().join(",")}`;
+  const { value: f, hit } = await cached(key, closed ? QUOTE_TTL_CLOSED_MS : QUOTE_TTL_OPEN_MS, () =>
+    fetchTimed((p) => p.getStockQuotes(symbols)),
+  );
+  return {
+    quotes: f.value.quotes,
+    unavailable: f.value.unavailable,
+    marketStatus: status,
+    meta: buildMeta(f, !closed, hit, Date.now() - started),
+  };
+}
+
+export async function getStockHistory(symbol: string, range: TimeRange): Promise<StockHistory> {
+  const status = getMarketStatus();
+  const closed = status.state === "CLOSED";
+  const started = Date.now();
+  const { value: f, hit } = await cached(`stock-history:${symbol}:${range}`, historyTtl(range, closed), () =>
+    fetchTimed((p) => p.getStockHistory(symbol, range)),
+  );
+  return {
+    symbol,
+    range,
+    points: f.value.points,
+    prevClose: f.value.prevClose,
+    marketStatus: status,
+    meta: buildMeta(f, !closed, hit, Date.now() - started),
   };
 }
