@@ -69,7 +69,7 @@ export class GeminiProvider implements AnalysisProvider {
   readonly label = "GOOGLE GEMINI";
 
   get model(): string {
-    return process.env.GEMINI_MODEL?.trim() || "gemini-flash-latest";
+    return process.env.GEMINI_MODEL?.trim() || "gemini-3.1-flash-lite";
   }
   private get base(): string {
     return process.env.GEMINI_API_BASE_URL?.trim() || DEFAULT_BASE;
