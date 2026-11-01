@@ -4,7 +4,8 @@ Next.js (App Router) + TypeScript + Tailwind CSS + shadcn/ui-style components + 
 
 - **Dashboard (`/`)**: IHSG, LQ45, IDX30, IDX80 cards, interactive IHSG chart (1D–1Y) and comparison table.
 - **Watchlist (`/watchlist`)**: your own IDX stocks (e.g. BBCA, BBRI), saved in your browser, with a chart per stock.
-- **API health (`/health`)**: live connectivity check of the data provider.
+- **Fundamental analysis (on `/watchlist`)**: metrics for the selected stock (valuation, profitability, growth, financial health) plus an optional AI summary from Google Gemini.
+- **API health (`/health`)**: live connectivity check of the data provider, the fundamentals source and the AI key.
 
 All numbers come from a real external source. There is no mock or sample data: if the source fails, the UI shows an error and keeps the last good data (marked stale).
 
@@ -41,13 +42,37 @@ The only provider is the **Yahoo Finance chart endpoint**: unofficial, no API ke
 
 Declare `dataMode` honestly (`realtime`, `delayed`); the badge and banner follow it.
 
+## AI fundamental analysis (Google Gemini, free tier)
+
+1. Create a key in [Google AI Studio](https://aistudio.google.com/apikey).
+2. Put it in `.env.local` (never commit it, never use a `NEXT_PUBLIC_` prefix):
+   ```
+   GEMINI_API_KEY=your-key
+   ```
+3. Restart `npm run dev`, open `/health` and confirm the Gemini row is OK, then open `/watchlist`, pick a stock and press **BUAT ANALISIS AI**.
+
+How it works, and why:
+- **Numbers first, AI second.** Fundamentals come from Yahoo's `quoteSummary` (unofficial; needs a cookie+crumb session that the app obtains itself). Ratios are computed in code; the AI only interprets the numbers it is given. Missing values are sent as `null` and the AI is told not to guess.
+- **No advice.** The prompt forbids buy/sell/hold, target prices and price predictions. Free text from the data source (e.g. business descriptions) is never sent to the model, which blocks prompt injection through the data.
+- **Validated output.** The answer must be JSON of a fixed shape; anything else is rejected instead of displayed. Each point carries the metric and value it relies on, shown next to the raw numbers so you can check it.
+- **Banks and other financials:** debt ratios, current ratio and free cash flow are flagged as not meaningful, and bank-specific metrics (NIM, NPL, CAR) are not available in this data.
+- **Insufficient data** (fewer than 5 of 10 core metrics) skips the AI call entirely.
+- **Protecting the free quota:** the AI is called only when you press the button (POST), answers are cached 6 hours, and there is a per-client limit (5/min) and a daily cap (`ANALYSIS_DAILY_LIMIT`, default 80). Counters are in memory, so on Vercel they are per serverless instance: a best-effort guard, not a hard limit. Check your real quota in AI Studio; free-tier limits change often.
+- **Privacy:** on Google's free tier, content you send may be used to improve their products. Only public market numbers are sent.
+- **Model:** `GEMINI_MODEL` defaults to `gemini-flash-latest`. Set another name if your key has no access to it.
+- **Switching vendor:** implement `AnalysisProvider` (`services/analysis/provider.ts`) and return it from `getAnalysisProvider()`.
+
+Not verified against the live services from the build sandbox: Yahoo's fundamentals session/fields and the real Gemini API. Use `/health` ("Fundamentals BBCA", "API key and model") to verify on your machine.
+
 ## API routes
 
 - `GET /api/market/indices`
 - `GET /api/market/history?code=IHSG&range=1D` (`range`: 1D, 1W, 1M, 3M, 6M, 1Y)
 - `GET /api/market/stocks?symbols=BBCA,BBRI` (max 12)
 - `GET /api/market/stocks/BBCA/history?range=1M`
-- `GET /api/health` (HTTP 503 when the provider is failing)
+- `GET /api/fundamentals/BBCA` (metrics only)
+- `POST /api/analysis/BBCA` (AI summary; needs `GEMINI_API_KEY`)
+- `GET /api/health` (HTTP 503 when the market data provider is failing)
 
 Errors use `{ "error": { "code", "message" } }` with 400 / 404 / 502 / 504.
 
@@ -59,10 +84,13 @@ src/
   components/ui/            shadcn-style primitives
   components/dashboard/     shared shell, cards, chart, table, banners, states
   components/watchlist/     watchlist page UI
+  components/fundamentals/  fundamentals + AI analysis panel
   components/health/        health page UI
   hooks/                    polling, clock, watchlist hooks
   lib/                      format, cache, env, symbols, api helpers
   services/market-data/     provider interface, providers/, normalizers/, health, market hours
+  services/fundamentals/    Yahoo quoteSummary session, normalizer, metric calculation
+  services/analysis/        AI provider interface, Gemini adapter, prompt, output validation
   types/market.ts           shared TypeScript interfaces
 ```
 

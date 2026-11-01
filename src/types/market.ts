@@ -103,7 +103,8 @@ export interface HealthCheck {
 export interface ProviderHealth {
   id: string;
   label: string;
-  dataMode: DataMode;
+  /** Null for non-market providers such as the AI service. */
+  dataMode: DataMode | null;
   status: HealthStatus;
   checks: HealthCheck[];
   /** Newest provider-reported data timestamp among successful checks. */

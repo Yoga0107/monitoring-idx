@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { AppShell } from "@/components/dashboard/app-shell";
 import { PriceChart } from "@/components/dashboard/price-chart";
+import { FundamentalsPanel } from "@/components/fundamentals/fundamentals-panel";
 import { EmptyPanel, ErrorPanel } from "@/components/dashboard/states";
 import { Button } from "@/components/ui/button";
 import { Icon } from "@/components/ui/icon";
@@ -236,6 +237,8 @@ export function WatchlistView() {
           fallbackMeta={stocks.data?.meta ?? null}
         />
       )}
+
+      {selected && <FundamentalsPanel key={selected} symbol={selected} />}
     </AppShell>
   );
 }

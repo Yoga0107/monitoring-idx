@@ -89,3 +89,34 @@ export function fmtChartTooltip(ms: number, range: string): string {
   const d = new Intl.DateTimeFormat("en-GB", { timeZone: TZ, day: "2-digit", month: "short", year: "numeric" }).format(ms);
   return range === "1W" ? `${d} ${fmtTimeWib(ms, false)}` : d;
 }
+
+/* ---------- Fundamental metrics ---------- */
+
+function fmtCompactCurrency(v: number, code: string | null): string {
+  const prefix = !code || code === "IDR" ? "Rp" : code;
+  const abs = Math.abs(v);
+  const sign = v < 0 ? "-" : "";
+  if (abs >= 1e12) return `${sign}${prefix} ${fmtNum(abs / 1e12)} triliun`;
+  if (abs >= 1e9) return `${sign}${prefix} ${fmtNum(abs / 1e9)} miliar`;
+  if (abs >= 1e6) return `${sign}${prefix} ${fmtNum(abs / 1e6)} juta`;
+  return `${sign}${prefix} ${fmtNum(abs, abs % 1 ? 2 : 0)}`;
+}
+
+/** Display text for a fundamental metric; "—" when the source has no value. */
+export function fmtMetric(value: number | null, format: "multiple" | "percent" | "currency" | "price" | "number", currency: string | null): string {
+  if (value === null) return "—";
+  switch (format) {
+    case "multiple":
+      return `${fmtNum(value)}x`;
+    case "percent":
+      return `${fmtNum(value)}%`;
+    case "currency":
+      return fmtCompactCurrency(value, currency);
+    case "price": {
+      const prefix = !currency || currency === "IDR" ? "Rp" : currency;
+      return `${prefix} ${fmtNum(value, Number.isInteger(value) ? 0 : 2)}`;
+    }
+    default:
+      return fmtNum(value);
+  }
+}

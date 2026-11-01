@@ -32,7 +32,7 @@ function ProviderCard({ p }: { p: ProviderHealth }) {
       <div className="flex flex-wrap items-center justify-between gap-2 pb-3 border-b border-outline-variant">
         <div className="flex items-center space-x-2">
           <h2 className="font-headline-md text-headline-md font-bold text-on-surface">{p.label}</h2>
-          <span className="font-label-caps text-label-caps px-1.5 py-0.5 rounded bg-surface-variant text-outline">{p.dataMode.toUpperCase()}</span>
+          <span className="font-label-caps text-label-caps px-1.5 py-0.5 rounded bg-surface-variant text-outline">{p.dataMode ? p.dataMode.toUpperCase() : "SERVICE"}</span>
         </div>
         <div className="flex items-center space-x-3">
           <span className="font-label-caps text-label-caps text-outline">

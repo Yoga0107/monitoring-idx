@@ -2,6 +2,8 @@ import "server-only";
 import type { HealthCheck, HealthReport, HealthStatus, IndexDefinition, ProviderHealth } from "@/types/market";
 import { cached } from "@/lib/cache";
 import { getYahooSymbol } from "@/lib/env";
+import { getFundamentals } from "@/services/fundamentals";
+import { getAnalysisProvider } from "@/services/analysis";
 import { getProvider } from ".";
 import { INDICES } from "./indices";
 import { getMarketStatus } from "./market-hours";
@@ -72,6 +74,26 @@ async function checkProvider(p: MarketDataProvider, marketState: ReturnType<type
   return { id: p.id, label: p.label, dataMode: p.dataMode, status: rollUp(checks), checks, latestDataAt: latest };
 }
 
+async function checkFundamentals(): Promise<ProviderHealth> {
+  const name = "Fundamentals BBCA";
+  const r = await timed(() => getFundamentals("BBCA"));
+  const check: HealthCheck = !r.ok
+    ? { name, status: "fail", latencyMs: r.ms, detail: r.error }
+    : r.value.report.sufficient
+      ? { name, status: "ok", latencyMs: r.ms, detail: `${r.value.report.coverage.available}/${r.value.report.coverage.total} metrics available.` }
+      : { name, status: "warn", latencyMs: r.ms, detail: `Only ${r.value.report.coverage.available}/${r.value.report.coverage.total} metrics available: too few for analysis.` };
+  return { id: "yahoo-fundamentals", label: "YAHOO FINANCE — FUNDAMENTALS", dataMode: null, status: check.status, checks: [check], latestDataAt: r.ok ? r.value.meta.fetchedAt : null };
+}
+
+async function checkAi(): Promise<ProviderHealth> {
+  const ai = getAnalysisProvider();
+  const r = await timed(() => ai.checkAccess());
+  const check: HealthCheck = r.ok
+    ? { name: "API key and model", status: "ok", latencyMs: r.ms, detail: r.value.detail }
+    : { name: "API key and model", status: r.error.includes("GEMINI_API_KEY is not set") ? "warn" : "fail", latencyMs: r.error.includes("is not set") ? null : r.ms, detail: r.error };
+  return { id: ai.id, label: `${ai.label} (AI ANALYSIS) · ${ai.model}`, dataMode: null, status: check.status, checks: [check], latestDataAt: null };
+}
+
 function summarize(provider: ProviderHealth): HealthReport["overall"] {
   if (provider.status === "ok") return { status: "ok", message: "The data provider is reachable and returning data." };
   if (provider.status === "warn") return { status: "warn", message: "The provider works, but some checks were skipped or flagged. See below." };
@@ -82,12 +104,17 @@ function summarize(provider: ProviderHealth): HealthReport["overall"] {
 export async function runHealthCheck(): Promise<HealthReport> {
   const { value } = await cached("health", 15_000, async (): Promise<HealthReport> => {
     const status = getMarketStatus();
-    const provider = await checkProvider(getProvider(), status.state);
+    const [provider, fundamentals, ai] = await Promise.all([checkProvider(getProvider(), status.state), checkFundamentals(), checkAi()]);
+    const overall = summarize(provider);
+    if (overall.status === "ok" && (fundamentals.status !== "ok" || ai.status !== "ok")) {
+      overall.status = "warn";
+      overall.message = "Market data is healthy, but the fundamentals or AI analysis features need attention (see below).";
+    }
     return {
       checkedAt: new Date().toISOString(),
       marketStatus: status,
-      overall: summarize(provider),
-      providers: [provider],
+      overall,
+      providers: [provider, fundamentals, ai],
       config: {
         yahooSymbols: INDICES.map((i) => ({ code: i.code, symbol: getYahooSymbol(i.code) || null })),
         nodeVersion: process.version,
