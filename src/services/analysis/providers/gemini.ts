@@ -29,7 +29,7 @@ interface GeminiBody {
   candidates?: Array<{ finishReason?: string; content?: { parts?: Array<{ text?: string; thought?: boolean }> } }>;
   promptFeedback?: { blockReason?: string };
   usageMetadata?: { promptTokenCount?: number; candidatesTokenCount?: number; thoughtsTokenCount?: number; totalTokenCount?: number };
-  error?: { code?: number; message?: string; status?: string };
+  error?: { code?: number; message?: string; status?: string; details?: Array<Record<string, unknown>> };
 }
 
 function thinkingBudget(): number | null {
@@ -42,7 +42,21 @@ function thinkingBudget(): number | null {
 function mapHttpError(status: number, body: GeminiBody | null): AnalysisError {
   const msg = body?.error?.message ?? "";
   if (status === 429) {
-    return new AnalysisError("Gemini free quota is used up or too many requests were sent. Try again later.", "QUOTA", 429);
+    // Gemini reports models that are not part of the free tier as "limit: 0", which is different from a used-up quota.
+    if (/limit:\s*0\b/.test(msg)) {
+      return new AnalysisError(
+        "This model has no free-tier quota for your key. Choose a different model: set GEMINI_MODEL to one listed on /health (Flash or Flash-Lite are the usual free ones).",
+        "QUOTA",
+        429,
+      );
+    }
+    const retry = (body?.error?.details ?? []).map((d) => d.retryDelay).find((v): v is string => typeof v === "string");
+    const secs = retry ? Math.ceil(parseFloat(retry)) : NaN;
+    return new AnalysisError(
+      `Gemini free-tier limit reached${Number.isFinite(secs) ? `; retry in about ${secs}s` : ""}. Free quotas are small and reset per minute and per day: check your limits in Google AI Studio.`,
+      "QUOTA",
+      429,
+    );
   }
   if (status === 400 && /api key/i.test(msg)) return new AnalysisError("GEMINI_API_KEY is invalid.", "NOT_CONFIGURED", 503);
   if (status === 401 || status === 403) return new AnalysisError("Gemini rejected the API key (invalid, restricted, or not allowed in this region).", "NOT_CONFIGURED", 503);
