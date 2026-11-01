@@ -9,7 +9,7 @@ interface Props {
 
 /** Always tells the viewer how fresh the numbers are. */
 export function DataBanner({ meta, error, loading }: Props) {
-  const shell = "px-6 py-1.5 bg-surface-container-lowest border-b border-outline-variant flex flex-wrap items-center justify-between gap-x-4 gap-y-1.5 text-outline";
+  const shell = "px-3 sm:px-6 py-1.5 bg-surface-container-lowest border-b border-outline-variant flex flex-wrap items-center justify-between gap-x-4 gap-y-1.5 text-outline";
 
   if (!meta) {
     return (

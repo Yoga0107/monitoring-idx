@@ -56,8 +56,8 @@ export function IndicesTable({ snapshot, loading, error, onRetry }: Props) {
           <h3 className="font-headline-md text-headline-md font-bold text-on-surface tracking-tight">Indonesian Stock Indices Matrix</h3>
           <p className="font-body-sm text-body-sm text-on-surface-variant">Benchmark tracking for major Indonesia Stock Exchange index baskets</p>
         </div>
-        <div className="flex items-center space-x-2">
-          <div className="relative w-full sm:w-64">
+        <div className="flex items-center space-x-2 w-full sm:w-auto">
+          <div className="relative min-w-0 flex-1 sm:flex-none sm:w-64">
             <Icon name="search" size={16} className="absolute left-2.5 top-2.5 text-outline" />
             <Input aria-label="Filter indices" placeholder="Filter index (e.g. LQ45)..." value={query} onChange={(e) => setQuery(e.target.value)} />
           </div>
@@ -72,7 +72,7 @@ export function IndicesTable({ snapshot, loading, error, onRetry }: Props) {
         <ErrorPanel message={error} onRetry={onRetry} />
       ) : (
         <div className="overflow-x-auto mt-2">
-          <table className="w-full text-left border-collapse min-w-[860px]" aria-busy={loading}>
+          <table className="hidden md:table w-full text-left border-collapse min-w-[860px]" aria-busy={loading}>
             <thead>
               <tr className="border-b border-outline-variant font-label-caps text-label-caps text-outline">
                 <th scope="col" className="py-2.5 px-3">INDEX CODE</th>
@@ -123,6 +123,45 @@ export function IndicesTable({ snapshot, loading, error, onRetry }: Props) {
                   })}
             </tbody>
           </table>
+          <ul className="md:hidden space-y-2" aria-label="Indices" aria-busy={loading}>
+            {loading && !snapshot
+              ? INDICES.map((i) => <li key={i.code}><Skeleton className="h-24 w-full" /></li>)
+              : rows.map(({ def, quote, reason }) => {
+                  if (!quote) {
+                    return (
+                      <li key={def.code} className="rounded border border-outline-variant bg-surface-container p-3">
+                        <span className="font-bold text-on-surface font-data-mono-md text-data-mono-md">{def.code}</span>
+                        <p className="font-body-sm text-body-sm text-on-surface-variant">Unavailable — {reason}</p>
+                      </li>
+                    );
+                  }
+                  const tone = toneOf(quote.change);
+                  return (
+                    <li key={def.code} className="rounded border border-outline-variant bg-surface-container p-3">
+                      <div className="flex items-center justify-between gap-2">
+                        <div className="flex items-center space-x-2 min-w-0">
+                          <span className={cn("w-1.5 h-1.5 rounded-full shrink-0", DOT[tone])} />
+                          <span className="font-bold text-on-surface font-data-mono-md text-data-mono-md">{quote.code}</span>
+                          <span className="truncate font-body-sm text-body-sm text-on-surface-variant">{quote.description}</span>
+                        </div>
+                        <span className={cn("shrink-0 px-1.5 py-0.5 rounded font-data-mono-sm text-data-mono-sm font-semibold", tonePill[tone])}>{fmtPct(quote.changePct)}</span>
+                      </div>
+                      <div className="mt-1.5 flex items-baseline justify-between">
+                        <span className="font-data-mono-xl text-data-mono-xl font-bold text-on-surface">{fmtNum(quote.last)}</span>
+                        <span className={cn("font-data-mono-sm text-data-mono-sm font-semibold", toneText[tone])}>{fmtSigned(quote.change)}</span>
+                      </div>
+                      <dl className="mt-1.5 grid grid-cols-2 gap-x-3 gap-y-0.5 font-label-caps text-label-caps text-outline">
+                        <dt>DAY RANGE</dt>
+                        <dd className="text-right text-on-surface-variant">{fmtNum(quote.low)} - {fmtNum(quote.high)}</dd>
+                        <dt>VOLUME (LOTS)</dt>
+                        <dd className="text-right text-on-surface-variant">{fmtLots(quote.volumeLots)}</dd>
+                        <dt>STATUS</dt>
+                        <dd className="text-right text-on-surface-variant">{statusLabel(quote, state)}</dd>
+                      </dl>
+                    </li>
+                  );
+                })}
+          </ul>
           {snapshot && rows.length === 0 && (
             <EmptyPanel icon="search_off" title="No indices match your filter" hint="Clear the search box or switch the direction filter back to ALL." />
           )}

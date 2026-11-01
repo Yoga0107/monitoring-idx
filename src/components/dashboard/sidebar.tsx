@@ -16,8 +16,10 @@ const BASE = "relative flex items-center justify-center w-10 h-10 transition-col
 
 export function Sidebar({ online }: { online: boolean }) {
   const pathname = usePathname();
+  // inset-y-0 (top:0 + bottom:0) tracks the *visible* viewport. h-screen (100vh) does not on mobile browsers,
+  // where the address bar makes 100vh taller than the screen. overflow-y-auto covers short landscape screens.
   return (
-    <aside className="fixed left-0 top-0 h-screen w-16 flex flex-col justify-between items-center py-4 z-40 bg-surface-container-low border-r border-outline-variant">
+    <aside className="fixed inset-y-0 left-0 w-16 flex flex-col justify-between items-center gap-6 pt-4 pb-[max(1rem,env(safe-area-inset-bottom))] z-40 bg-surface-container-low border-r border-outline-variant overflow-y-auto overscroll-contain">
       <div className="flex flex-col items-center w-full space-y-6">
         <div className="w-10 h-10 rounded-lg bg-surface-container-high border border-outline-variant flex flex-col items-center justify-center p-1 hover:border-primary transition-colors">
           <span className="text-primary font-headline-md text-headline-md font-bold leading-none tracking-tight">MI</span>

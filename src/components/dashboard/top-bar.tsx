@@ -38,18 +38,23 @@ export function TopBar({ status, meta, lastUpdate, error, loading, refreshing, o
   const apiDot = error ? "bg-error" : meta ? "bg-primary-container" : "bg-outline";
 
   return (
-    <header className="flex justify-between items-center w-full px-6 py-3 bg-surface border-b border-outline-variant sticky top-0 z-30">
-      <div className="flex items-center space-x-4">
-        <div>
+    <header className="flex justify-between items-center gap-2 w-full px-3 sm:px-6 py-3 bg-surface border-b border-outline-variant sticky top-0 z-30">
+      <div className="flex items-center space-x-4 min-w-0">
+        <div className="min-w-0">
           <div className="flex items-center space-x-2">
-            <h1 className="font-headline-md text-headline-md font-bold text-on-surface tracking-tight">Market Insight</h1>
+            <h1 className="truncate font-headline-md text-headline-md font-bold text-on-surface tracking-tight">Market Insight</h1>
             <span className="text-outline hidden sm:inline">/</span>
             <span className="font-body-sm text-body-sm text-on-surface-variant hidden sm:inline">Indonesian Stock Market (IDX)</span>
           </div>
           <div className="flex items-center space-x-2 mt-0.5 min-h-4">
-            <span className="font-data-mono-sm text-data-mono-sm text-outline">{now ? fmtDateId(now) : "\u00A0"}</span>
-            <span className="text-outline text-xs">•</span>
+            <span className="hidden sm:inline font-data-mono-sm text-data-mono-sm text-outline">{now ? fmtDateId(now) : "\u00A0"}</span>
+            <span className="hidden sm:inline text-outline text-xs">•</span>
             <span className="font-data-mono-sm text-data-mono-sm text-on-surface font-semibold">{now ? fmtTimeWib(now) : "--:--:-- WIB"}</span>
+            {/* The full status pill is hidden on phones, so show a compact one here. */}
+            <span className="sm:hidden inline-flex items-center space-x-1">
+              <span className={cn("w-1.5 h-1.5 rounded-full", dot)} />
+              <span className={cn("font-label-caps text-label-caps", text)}>{status?.state ?? "—"}</span>
+            </span>
           </div>
         </div>
         <div className="h-6 w-px bg-outline-variant hidden sm:block" />
@@ -59,7 +64,7 @@ export function TopBar({ status, meta, lastUpdate, error, loading, refreshing, o
         </div>
       </div>
 
-      <div className="flex items-center space-x-4">
+      <div className="flex items-center space-x-4 shrink-0">
         <div className="hidden lg:flex items-center space-x-2 px-2 py-0.5 rounded border border-outline-variant bg-surface-container-low">
           <span className={cn("w-1.5 h-1.5 rounded-full", apiDot)} />
           <span className="font-label-caps text-label-caps text-on-surface-variant">{apiLabel}</span>

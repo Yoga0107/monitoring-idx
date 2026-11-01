@@ -72,8 +72,8 @@ export function HealthView() {
   const overall = data ? STYLE[data.overall.status] : null;
 
   return (
-    <div className="min-h-screen">
-      <header className="flex flex-wrap items-center justify-between gap-3 px-6 py-3 bg-surface border-b border-outline-variant sticky top-0 z-30">
+    <div className="min-h-screen min-h-dvh">
+      <header className="flex flex-wrap items-center justify-between gap-3 px-3 sm:px-6 py-3 bg-surface border-b border-outline-variant sticky top-0 z-30">
         <div className="flex items-center space-x-3">
           <Link href="/" className="flex items-center space-x-1 text-outline hover:text-primary transition-colors" aria-label="Back to dashboard">
             <Icon name="arrow_back" size={18} />
@@ -91,7 +91,7 @@ export function HealthView() {
         </div>
       </header>
 
-      <main className="p-4 sm:p-6 space-y-6 max-w-5xl mx-auto">
+      <main className="p-3 sm:p-6 space-y-4 sm:space-y-6 max-w-5xl mx-auto">
         {loading && !data ? (
           <div className="space-y-4" aria-busy>
             <Skeleton className="h-20 w-full" />

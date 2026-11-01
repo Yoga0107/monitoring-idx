@@ -89,13 +89,13 @@ export function WatchlistView() {
             </p>
           </div>
           <form
-            className="flex items-center space-x-2"
+            className="flex items-center space-x-2 w-full sm:w-auto"
             onSubmit={(e) => {
               e.preventDefault();
               submit(input);
             }}
           >
-            <div className="relative w-full sm:w-56">
+            <div className="relative min-w-0 flex-1 sm:flex-none sm:w-56">
               <Icon name="add" size={16} className="absolute left-2.5 top-2.5 text-outline" />
               <Input
                 aria-label="Add stock ticker"
@@ -142,7 +142,7 @@ export function WatchlistView() {
           <ErrorPanel message={stocks.error} onRetry={stocks.refresh} />
         ) : (
           <div className="overflow-x-auto mt-2">
-            <table className="w-full text-left border-collapse min-w-[760px]" aria-busy={waiting}>
+            <table className="hidden md:table w-full text-left border-collapse min-w-[760px]" aria-busy={waiting}>
               <thead>
                 <tr className="border-b border-outline-variant font-label-caps text-label-caps text-outline">
                   <th scope="col" className="py-2.5 px-3">SYMBOL</th>
@@ -211,6 +211,48 @@ export function WatchlistView() {
                 })}
               </tbody>
             </table>
+            <ul className="md:hidden space-y-2" aria-label="Watchlist" aria-busy={waiting}>
+              {list.map((sym) => {
+                const q = quoteOf.get(sym);
+                const isSel = sym === selected;
+                const reason = stocks.data?.unavailable.find((u) => u.symbol === sym)?.reason;
+                const tone = q ? toneOf(q.change) : "flat";
+                const d = priceDecimals(q ?? null);
+                return (
+                  <li key={sym} className={cn("rounded border p-3 bg-surface-container", isSel ? "border-primary-container" : "border-outline-variant")}>
+                    <div className="flex items-start justify-between gap-2">
+                      <button type="button" onClick={() => setPicked(sym)} aria-pressed={isSel} className="min-w-0 text-left">
+                        <span className={cn("block font-bold font-data-mono-md text-data-mono-md", isSel ? "text-primary" : "text-on-surface")}>{sym}</span>
+                        <span className="block truncate font-body-sm text-body-sm text-on-surface-variant">{q?.name ?? "—"}</span>
+                      </button>
+                      <Button variant="ghost" size="icon" aria-label={`Remove ${sym}`} onClick={() => remove(sym)}>
+                        <Icon name="close" size={16} />
+                      </Button>
+                    </div>
+                    {q ? (
+                      <>
+                        <div className="mt-1 flex items-baseline justify-between">
+                          <span className="font-data-mono-xl text-data-mono-xl font-bold text-on-surface">{fmtNum(q.last, d)}</span>
+                          <span className={cn("px-1.5 py-0.5 rounded font-data-mono-sm text-data-mono-sm font-semibold", tonePill[tone])}>
+                            {q.change > 0 ? "+" : q.change < 0 ? "-" : ""}{fmtNum(Math.abs(q.change), d)} ({fmtPct(q.changePct)})
+                          </span>
+                        </div>
+                        <dl className="mt-1.5 grid grid-cols-2 gap-x-3 gap-y-0.5 font-label-caps text-label-caps text-outline">
+                          <dt>DAY RANGE</dt>
+                          <dd className="text-right text-on-surface-variant">{fmtNum(q.low, d)} - {fmtNum(q.high, d)}</dd>
+                          <dt>VOLUME (LOTS)</dt>
+                          <dd className="text-right text-on-surface-variant">{fmtLots(q.volumeLots)}</dd>
+                        </dl>
+                      </>
+                    ) : waiting && !reason ? (
+                      <Skeleton className="mt-2 h-8 w-full" />
+                    ) : (
+                      <p className="mt-1 font-body-sm text-body-sm text-on-surface-variant">Unavailable — {reason ?? "no data returned"}</p>
+                    )}
+                  </li>
+                );
+              })}
+            </ul>
           </div>
         )}
         {list.length > 0 && (
