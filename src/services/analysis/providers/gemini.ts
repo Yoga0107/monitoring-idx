@@ -6,7 +6,12 @@ import { AnalysisError, type AnalysisProvider, type TokenUsage } from "../provid
  * Free-tier quotas change often: check AI Studio for the limits that apply to your project.
  */
 const DEFAULT_BASE = "https://generativelanguage.googleapis.com/v1beta";
-const TIMEOUT_MS = 30_000;
+/** Generation can take a while on free tiers (especially "thinking" models). Keep below the route's maxDuration (60 s). */
+function generateTimeoutMs(): number {
+  const n = Number(process.env.GEMINI_TIMEOUT_MS);
+  return Number.isFinite(n) && n >= 5_000 ? Math.min(n, 55_000) : 45_000;
+}
+const CHECK_TIMEOUT_MS = 10_000;
 
 function apiKey(): string {
   const key = process.env.GEMINI_API_KEY?.trim();
@@ -14,6 +19,10 @@ function apiKey(): string {
     throw new AnalysisError("GEMINI_API_KEY is not set. Create a key in Google AI Studio and add it to .env.local.", "NOT_CONFIGURED", 503);
   }
   return key;
+}
+
+interface ModelList {
+  models?: Array<{ name?: string; supportedGenerationMethods?: string[] }>;
 }
 
 interface GeminiBody {
@@ -52,19 +61,27 @@ export class GeminiProvider implements AnalysisProvider {
     return process.env.GEMINI_API_BASE_URL?.trim() || DEFAULT_BASE;
   }
 
-  private async call(url: string, init: RequestInit): Promise<{ status: number; body: GeminiBody | null }> {
+  private async call(url: string, init: RequestInit, timeoutMs: number): Promise<{ status: number; body: GeminiBody | null }> {
     try {
-      const res = await fetch(url, { ...init, cache: "no-store", signal: AbortSignal.timeout(TIMEOUT_MS) });
+      const res = await fetch(url, { ...init, cache: "no-store", signal: AbortSignal.timeout(timeoutMs) });
       return { status: res.status, body: (await res.json().catch(() => null)) as GeminiBody | null };
     } catch (e) {
       const timedOut = e instanceof Error && (e.name === "TimeoutError" || e.name === "AbortError");
-      throw new AnalysisError(timedOut ? "Gemini timed out." : "Could not reach Gemini.", timedOut ? "UPSTREAM_TIMEOUT" : "UPSTREAM_ERROR", timedOut ? 504 : 502);
+      throw new AnalysisError(
+        timedOut
+          ? `Gemini did not answer within ${Math.round(timeoutMs / 1000)}s (model: ${this.model}). The model may be slow or spending too long "thinking": set GEMINI_MODEL to a Flash-Lite model and GEMINI_THINKING_BUDGET=0, or check that your network can reach generativelanguage.googleapis.com.`
+          : "Could not reach Gemini. Check your network, proxy or firewall.",
+        timedOut ? "UPSTREAM_TIMEOUT" : "UPSTREAM_ERROR",
+        timedOut ? 504 : 502,
+      );
     }
   }
 
   async generateJson({ system, user }: { system: string; user: string }): Promise<{ text: string; usage: TokenUsage | null }> {
     const key = apiKey();
-    const { status, body } = await this.call(`${this.base}/models/${encodeURIComponent(this.model)}:generateContent`, {
+    const url = `${this.base}/models/${encodeURIComponent(this.model)}:generateContent`;
+    const send = (withThinking: boolean) =>
+      this.call(url, {
       method: "POST",
       headers: { "Content-Type": "application/json", "x-goog-api-key": key },
       body: JSON.stringify({
@@ -76,11 +93,18 @@ export class GeminiProvider implements AnalysisProvider {
           maxOutputTokens: 4096,
           responseMimeType: "application/json",
           // Optional lever to cut hidden reasoning tokens (0 = off). Only some models accept it.
-          ...(thinkingBudget() !== null ? { thinkingConfig: { thinkingBudget: thinkingBudget() } } : {}),
+          ...(withThinking && thinkingBudget() !== null ? { thinkingConfig: { thinkingBudget: thinkingBudget() } } : {}),
         },
       }),
-    });
-    if (status < 200 || status >= 300) throw mapHttpError(status, body);
+    }, generateTimeoutMs());
+
+    let { status, body } = await send(true);
+    // Some models reject the optional thinking setting: retry once without it instead of failing.
+    if (status === 400 && thinkingBudget() !== null && /think/i.test(body?.error?.message ?? "")) {
+      console.warn(`[gemini] ${this.model} rejected GEMINI_THINKING_BUDGET; retrying without it. Remove it from .env.local.`);
+      ({ status, body } = await send(false));
+    }
+    if (status < 200 || status >= 300) throw await this.failure(status, body);
 
     if (body?.promptFeedback?.blockReason) {
       throw new AnalysisError(`Gemini blocked the request (${body.promptFeedback.blockReason}).`, "BAD_OUTPUT", 502);
@@ -101,13 +125,38 @@ export class GeminiProvider implements AnalysisProvider {
     return { text, usage };
   }
 
+  /** Maps an HTTP failure; for "model not found" it also lists the model names this key can use. */
+  private async failure(status: number, body: GeminiBody | null): Promise<AnalysisError> {
+    if (status !== 404) return mapHttpError(status, body);
+    const names = await this.listUsableModels();
+    const hint = names.length
+      ? ` Models available to your key that can generate text: ${names.join(", ")}. Set GEMINI_MODEL to one of these.`
+      : " Could not list the available models; check the names in Google AI Studio.";
+    return new AnalysisError(`Gemini model "${this.model}" was not found.${hint}`, "NOT_CONFIGURED", 503);
+  }
+
+  private async listUsableModels(): Promise<string[]> {
+    try {
+      const { status, body } = await this.call(`${this.base}/models?pageSize=100`, { headers: { "x-goog-api-key": apiKey() } }, CHECK_TIMEOUT_MS);
+      if (status !== 200) return [];
+      const names = ((body as ModelList | null)?.models ?? [])
+        .filter((m) => m.supportedGenerationMethods?.includes("generateContent"))
+        .map((m) => (m.name ?? "").replace(/^models\//, ""))
+        .filter((n) => /^gemini-/.test(n));
+      const flash = names.filter((n) => /flash/.test(n));
+      return (flash.length ? flash : names).slice(0, 12);
+    } catch {
+      return [];
+    }
+  }
+
   /** Reads model metadata only: validates the key and model name without generating text. */
   async checkAccess(): Promise<{ detail: string }> {
     const key = apiKey();
     const { status, body } = await this.call(`${this.base}/models/${encodeURIComponent(this.model)}`, {
       headers: { "x-goog-api-key": key },
-    });
-    if (status < 200 || status >= 300) throw mapHttpError(status, body);
+    }, CHECK_TIMEOUT_MS);
+    if (status < 200 || status >= 300) throw await this.failure(status, body);
     return { detail: `Key accepted, model "${this.model}" is available.` };
   }
 }
